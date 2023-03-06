@@ -94,7 +94,7 @@ extension DataSourceFacade {
                     let alertController = await UIAlertController(for: error, title: nil, preferredStyle: .alert)
                     let okAction = await UIAlertAction(title: L10n.Common.Controls.Actions.ok, style: .default)
                     await alertController.addAction(okAction)
-                    await dependency.coordinator.present(
+                    _ = await dependency.coordinator.present(
                         scene: .alertController(alertController: alertController),
                         from: nil,
                         transition: .alertController(animated: true, completion: nil)
@@ -131,4 +131,15 @@ extension DataSourceFacade {
             }
         }
     }   // end func
+}
+
+extension DataSourceFacade {
+  static func responseToShowHideReblogAction(
+    dependency: NeedsDependency & AuthContextProvider,
+    user: ManagedObjectRecord<MastodonUser>
+  ) async throws {
+    _ = try await dependency.context.apiService.toggleShowReblogs(
+      for: user,
+      authenticationBox: dependency.authContext.mastodonAuthenticationBox)
+  }
 }

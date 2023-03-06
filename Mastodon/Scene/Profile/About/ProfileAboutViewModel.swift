@@ -31,6 +31,7 @@ final class ProfileAboutViewModel {
     
     @Published var fields: [MastodonField] = []
     @Published var emojiMeta: MastodonContent.Emojis = [:]
+    @Published var createdAt: Date = Date()
 
     init(context: AppContext) {
         self.context = context
@@ -46,13 +47,18 @@ final class ProfileAboutViewModel {
             .compactMap { $0 }
             .flatMap { $0.publisher(for: \.fields) }
             .assign(to: &$fields)
+
+        $user
+            .compactMap { $0 }
+            .flatMap { $0.publisher(for: \.createdAt) }
+            .assign(to: &$createdAt)
         
         Publishers.CombineLatest(
             $fields,
             $emojiMeta
         )
         .map { fields, emojiMeta in
-            fields.map { ProfileFieldItem.FieldValue(name: $0.name, value: $0.value, emojiMeta: emojiMeta) }
+            fields.map { ProfileFieldItem.FieldValue(name: $0.name, value: $0.value, verifiedAt: $0.verifiedAt, emojiMeta: emojiMeta) }
         }
         .assign(to: &profileInfo.$fields)
         
@@ -72,6 +78,7 @@ final class ProfileAboutViewModel {
                 ProfileFieldItem.FieldValue(
                     name: field.name,
                     value: field.value,
+                    verifiedAt: field.verifiedAt,
                     emojiMeta: [:]      // no use for editing
                 )
             } ?? []
@@ -92,7 +99,7 @@ extension ProfileAboutViewModel {
     func appendFieldItem() {
         var fields = profileInfoEditing.fields
         guard fields.count < ProfileHeaderViewModel.maxProfileFieldCount else { return }
-        fields.append(ProfileFieldItem.FieldValue(name: "", value: "", emojiMeta: [:]))
+        fields.append(ProfileFieldItem.FieldValue(name: "", value: "", verifiedAt: nil, emojiMeta: [:]))
         profileInfoEditing.fields = fields
     }
     
@@ -112,7 +119,7 @@ extension ProfileAboutViewModel: ProfileViewModelEditable {
         
         let isFieldsEqual: Bool = {
             let originalFields = self.accountForEdit?.source?.fields?.compactMap { field in
-                ProfileFieldItem.FieldValue(name: field.name, value: field.value, emojiMeta: [:])
+                ProfileFieldItem.FieldValue(name: field.name, value: field.value, verifiedAt: nil, emojiMeta: [:])
             } ?? []
             let editFields = profileInfoEditing.fields
             guard editFields.count == originalFields.count else { return false }

@@ -43,7 +43,7 @@ extension DataSourceFacade {
             dependency: provider,
             status: status
         )
-        provider.coordinator.present(
+        _ = provider.coordinator.present(
             scene: .activityViewController(
                 activityViewController: activityViewController,
                 sourceView: button,
@@ -59,8 +59,18 @@ extension DataSourceFacade {
         status: ManagedObjectRecord<Status>
     ) async throws -> UIActivityViewController {
         var activityItems: [Any] = try await dependency.context.managedObjectContext.perform {
-            guard let status = status.object(in: dependency.context.managedObjectContext) else { return [] }
-            return [StatusActivityItem(status: status)].compactMap { $0 } as [Any]
+            guard let status = status.object(in: dependency.context.managedObjectContext),
+                  let url = URL(string: status.url ?? status.uri)
+            else { return [] }
+            return [
+                URLActivityItemWithMetadata(url: url) { metadata in
+                    metadata.title = "\(status.author.displayName) (@\(status.author.acctWithDomain))"
+                    metadata.iconProvider = ImageProvider(
+                        url: status.author.avatarImageURLWithFallback(domain: status.author.domain),
+                        filter: ScaledToSizeFilter(size: CGSize.authorAvatarButtonSize)
+                    ).itemProvider
+                }
+            ] as [Any]
         }
         var applicationActivities: [UIActivity] = [
             SafariActivity(sceneCoordinator: dependency.coordinator),     // open URL
@@ -76,54 +86,6 @@ extension DataSourceFacade {
             applicationActivities: applicationActivities
         )
         return activityViewController
-    }
-
-    private class StatusActivityItem: NSObject, UIActivityItemSource {
-        init?(status: Status) {
-            guard let url = URL(string: status.url ?? status.uri) else { return nil }
-            self.url = url
-            self.metadata = LPLinkMetadata()
-            metadata.url = url
-            metadata.title = "\(status.author.displayName) (@\(status.author.username)@\(status.author.domain))"
-            metadata.iconProvider = NSItemProvider(object: IconProvider(url: status.author.avatarImageURLWithFallback(domain: status.author.domain)))
-        }
-
-        let url: URL
-        let metadata: LPLinkMetadata
-
-        func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any {
-            url
-        }
-
-        func activityViewController(_ activityViewController: UIActivityViewController, itemForActivityType activityType: UIActivity.ActivityType?) -> Any? {
-            url
-        }
-
-        func activityViewControllerLinkMetadata(_ activityViewController: UIActivityViewController) -> LPLinkMetadata? {
-            metadata
-        }
-
-        private class IconProvider: NSObject, NSItemProviderWriting {
-            let url: URL
-            init(url: URL) {
-                self.url = url
-            }
-
-            static var writableTypeIdentifiersForItemProvider: [String] {
-                [UTType.png.identifier]
-            }
-
-            func loadData(withTypeIdentifier typeIdentifier: String, forItemProviderCompletionHandler completionHandler: @escaping @Sendable (Data?, Error?) -> Void) -> Progress? {
-                let filter = ScaledToSizeFilter(size: CGSize.authorAvatarButtonSize)
-                let receipt = UIImageView.af.sharedImageDownloader.download(URLRequest(url: url), filter: filter, completion: { response in
-                    switch response.result {
-                    case .failure(let error): completionHandler(nil, error)
-                    case .success(let image): completionHandler(image.pngData(), nil)
-                    }
-                })
-                return receipt?.request.downloadProgress
-            }
-        }
     }
 }
 
@@ -155,7 +117,7 @@ extension DataSourceFacade {
             let composeViewModel = ComposeViewModel(
                 context: provider.context,
                 authContext: provider.authContext,
-                kind: .reply(status: status)
+                destination: .reply(parent: status)
             )
             _ = provider.coordinator.present(
                 scene: .compose(viewModel: composeViewModel),
@@ -205,6 +167,45 @@ extension DataSourceFacade {
         menuContext: MenuContext
     ) async throws {
         switch action {
+            case .hideReblogs(let actionContext):
+                let title = actionContext.showReblogs ? L10n.Scene.Profile.RelationshipActionAlert.ConfirmHideReblogs.title : L10n.Scene.Profile.RelationshipActionAlert.ConfirmShowReblogs.title
+                let message = actionContext.showReblogs ? L10n.Scene.Profile.RelationshipActionAlert.ConfirmHideReblogs.message : L10n.Scene.Profile.RelationshipActionAlert.ConfirmShowReblogs.message
+
+                let alertController = UIAlertController(
+                    title: title,
+                    message: message,
+                    preferredStyle: .alert
+                )
+
+                let actionTitle = actionContext.showReblogs ? L10n.Common.Controls.Friendship.hideReblogs : L10n.Common.Controls.Friendship.showReblogs
+                let showHideReblogsAction = UIAlertAction(
+                    title: actionTitle,
+                    style: .destructive
+                ) { [weak dependency] _ in
+                    guard let dependency else { return }
+
+                    Task {
+                        let managedObjectContext = dependency.context.managedObjectContext
+                        let _user: ManagedObjectRecord<MastodonUser>? = try? await managedObjectContext.perform {
+                            guard let user = menuContext.author?.object(in: managedObjectContext) else { return nil }
+                            return ManagedObjectRecord<MastodonUser>(objectID: user.objectID)
+                        }
+
+                        guard let user = _user else { return }
+
+                        try await DataSourceFacade.responseToShowHideReblogAction(
+                            dependency: dependency,
+                            user: user
+                        )
+                    }
+                }
+
+                alertController.addAction(showHideReblogsAction)
+
+                let cancelAction = UIAlertAction(title: L10n.Common.Controls.Actions.cancel, style: .cancel)
+                alertController.addAction(cancelAction)
+
+                dependency.present(alertController, animated: true)
         case .muteUser(let actionContext):
             let alertController = UIAlertController(
                 title: actionContext.isMuting ? L10n.Scene.Profile.RelationshipActionAlert.ConfirmUnmuteUser.title : L10n.Scene.Profile.RelationshipActionAlert.ConfirmMuteUser.title,
@@ -230,9 +231,9 @@ extension DataSourceFacade {
                 }   // end Task
             }
             alertController.addAction(confirmAction)
-            let cancelAction = UIAlertAction(title: L10n.Common.Controls.Actions.cancel, style: .cancel, handler: nil)
+            let cancelAction = UIAlertAction(title: L10n.Common.Controls.Actions.cancel, style: .cancel)
             alertController.addAction(cancelAction)
-            dependency.present(alertController, animated: true, completion: nil)
+            dependency.present(alertController, animated: true)
         case .blockUser(let actionContext):
             let alertController = UIAlertController(
                 title: actionContext.isBlocking ? L10n.Scene.Profile.RelationshipActionAlert.ConfirmUnblockUser.title : L10n.Scene.Profile.RelationshipActionAlert.ConfirmBlockUser.title,
@@ -258,9 +259,9 @@ extension DataSourceFacade {
                 }   // end Task
             }
             alertController.addAction(confirmAction)
-            let cancelAction = UIAlertAction(title: L10n.Common.Controls.Actions.cancel, style: .cancel, handler: nil)
+            let cancelAction = UIAlertAction(title: L10n.Common.Controls.Actions.cancel, style: .cancel)
             alertController.addAction(cancelAction)
-            dependency.present(alertController, animated: true, completion: nil)
+            dependency.present(alertController, animated: true)
         case .reportUser:
             Task {
                 guard let user = menuContext.author else { return }
@@ -319,7 +320,8 @@ extension DataSourceFacade {
                     dependency: dependency,
                     status: status
                 )
-                await dependency.coordinator.present(
+                
+                _ = dependency.coordinator.present(
                     scene: .activityViewController(
                         activityViewController: activityViewController,
                         sourceView: menuContext.button,
@@ -349,10 +351,22 @@ extension DataSourceFacade {
                 }   // end Task
             }
             alertController.addAction(confirmAction)
-            let cancelAction = UIAlertAction(title: L10n.Common.Controls.Actions.cancel, style: .cancel, handler: nil)
+            let cancelAction = UIAlertAction(title: L10n.Common.Controls.Actions.cancel, style: .cancel)
             alertController.addAction(cancelAction)
-            dependency.present(alertController, animated: true, completion: nil)
+            dependency.present(alertController, animated: true)
             
+        case .translateStatus:
+            guard let status = menuContext.status else { return }
+            do {
+                try await DataSourceFacade.translateStatus(
+                    provider: dependency,
+                    status: status
+                )
+            } catch TranslationFailure.emptyOrInvalidResponse {
+                let alertController = UIAlertController(title: L10n.Common.Alerts.TranslationFailed.title, message: L10n.Common.Alerts.TranslationFailed.message, preferredStyle: .alert)
+                alertController.addAction(UIAlertAction(title: L10n.Common.Alerts.TranslationFailed.button, style: .default))
+                dependency.present(alertController, animated: true)
+            }
         }
     }   // end func
 }
@@ -371,3 +385,4 @@ extension DataSourceFacade {
     }
     
 }
+

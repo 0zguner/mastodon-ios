@@ -149,28 +149,43 @@ extension StatusAuthorView {
         public let isBlocking: Bool
         public let isMyself: Bool
         public let isBookmarking: Bool
+        
+        public let isTranslationEnabled: Bool
+        public let isTranslated: Bool
+        public let statusLanguage: String?
     }
 
     public func setupAuthorMenu(menuContext: AuthorMenuContext) -> (UIMenu, [UIAccessibilityCustomAction]) {
-        var actions: [MastodonMenu.Action] = []
+        var actions = [MastodonMenu.Action]()
 
-        actions = [
-            .muteUser(.init(
-                name: menuContext.name,
-                isMuting: menuContext.isMuting
-            )),
-            .blockUser(.init(
-                name: menuContext.name,
-                isBlocking: menuContext.isBlocking
-            )),
-            .reportUser(
-                .init(name: menuContext.name)
-            ),
+        if !menuContext.isMyself {
+            if let statusLanguage = menuContext.statusLanguage, menuContext.isTranslationEnabled, !menuContext.isTranslated {
+                actions.append(
+                    .translateStatus(.init(language: statusLanguage))
+                )
+            }
+            
+            actions.append(contentsOf: [
+                .muteUser(.init(
+                    name: menuContext.name,
+                    isMuting: menuContext.isMuting
+                )),
+                .blockUser(.init(
+                    name: menuContext.name,
+                    isBlocking: menuContext.isBlocking
+                )),
+                .reportUser(
+                    .init(name: menuContext.name)
+                )
+            ])
+        }
+        
+        actions.append(contentsOf: [
             .bookmarkStatus(
                 .init(isBookmarking: menuContext.isBookmarking)
             ),
             .shareStatus
-        ]
+        ])
 
         if menuContext.isMyself {
             actions.append(.deleteStatus)

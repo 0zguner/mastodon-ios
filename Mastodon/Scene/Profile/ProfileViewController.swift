@@ -51,6 +51,7 @@ final class ProfileViewController: UIViewController, NeedsDependency, MediaPrevi
             action: #selector(ProfileViewController.settingBarButtonItemPressed(_:))
         )
         barButtonItem.tintColor = .white
+        barButtonItem.accessibilityLabel = L10n.Common.Controls.Actions.settings
         return barButtonItem
     }()
 
@@ -62,6 +63,7 @@ final class ProfileViewController: UIViewController, NeedsDependency, MediaPrevi
             action: #selector(ProfileViewController.shareBarButtonItemPressed(_:))
         )
         barButtonItem.tintColor = .white
+        barButtonItem.accessibilityLabel = L10n.Common.Controls.Actions.share
         return barButtonItem
     }()
 
@@ -73,6 +75,7 @@ final class ProfileViewController: UIViewController, NeedsDependency, MediaPrevi
             action: #selector(ProfileViewController.favoriteBarButtonItemPressed(_:))
         )
         barButtonItem.tintColor = .white
+        barButtonItem.accessibilityLabel = L10n.Scene.Favorite.title
         return barButtonItem
     }()
     
@@ -84,23 +87,33 @@ final class ProfileViewController: UIViewController, NeedsDependency, MediaPrevi
             action: #selector(ProfileViewController.bookmarkBarButtonItemPressed(_:))
         )
         barButtonItem.tintColor = .white
+        barButtonItem.accessibilityLabel = L10n.Scene.Bookmark.title
         return barButtonItem
     }()
 
     private(set) lazy var replyBarButtonItem: UIBarButtonItem = {
         let barButtonItem = UIBarButtonItem(image: UIImage(systemName: "arrowshape.turn.up.left"), style: .plain, target: self, action: #selector(ProfileViewController.replyBarButtonItemPressed(_:)))
         barButtonItem.tintColor = .white
+        barButtonItem.accessibilityLabel = L10n.Common.Controls.Actions.reply
         return barButtonItem
     }()
 
     let moreMenuBarButtonItem: UIBarButtonItem = {
         let barButtonItem = UIBarButtonItem(image: UIImage(systemName: "ellipsis.circle"), style: .plain, target: nil, action: nil)
         barButtonItem.tintColor = .white
+        barButtonItem.accessibilityLabel = L10n.Common.Controls.Actions.seeMore
+        return barButtonItem
+    }()
+    
+    private(set) lazy var followedTagsBarButtonItem: UIBarButtonItem = {
+        let barButtonItem = UIBarButtonItem(image: UIImage(systemName: "number"), style: .plain, target: self, action: #selector(ProfileViewController.followedTagsItemPressed(_:)))
+        barButtonItem.tintColor = .white
+        barButtonItem.accessibilityLabel = L10n.Scene.FollowedTags.title
         return barButtonItem
     }()
 
-    let refreshControl: UIRefreshControl = {
-        let refreshControl = UIRefreshControl()
+    let refreshControl: RefreshControl = {
+        let refreshControl = RefreshControl()
         refreshControl.tintColor = .white
         return refreshControl
     }()
@@ -237,6 +250,11 @@ extension ProfileViewController {
                 items.append(self.shareBarButtonItem)
                 items.append(self.favoriteBarButtonItem)
                 items.append(self.bookmarkBarButtonItem)
+                
+                if self.currentInstance?.canFollowTags == true {
+                    items.append(self.followedTagsBarButtonItem)
+                }
+                
                 return
             }
 
@@ -253,12 +271,7 @@ extension ProfileViewController {
         tabBarPagerController.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(tabBarPagerController.view)
         tabBarPagerController.didMove(toParent: self)
-        NSLayoutConstraint.activate([
-            tabBarPagerController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            tabBarPagerController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tabBarPagerController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tabBarPagerController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-        ])
+        tabBarPagerController.view.pinToParent()
 
         tabBarPagerController.delegate = self
         tabBarPagerController.dataSource = self
@@ -297,6 +310,9 @@ extension ProfileViewController {
             .store(in: &disposeBag)
         viewModel.$isUpdating
             .assign(to: \.isUpdating, on: headerViewModel)
+            .store(in: &disposeBag)
+        viewModel.relationshipViewModel.$isMyself
+            .assign(to: \.isMyself, on: headerViewModel)
             .store(in: &disposeBag)
         viewModel.relationshipViewModel.$optionSet
             .map { $0 ?? .none }
@@ -376,13 +392,22 @@ extension ProfileViewController {
             }
             let name = user.displayNameWithFallback
             let _ = ManagedObjectRecord<MastodonUser>(objectID: user.objectID)
+
+            var menuActions: [MastodonMenu.Action] = [
+                .muteUser(.init(name: name, isMuting: self.viewModel.relationshipViewModel.isMuting)),
+                .blockUser(.init(name: name, isBlocking: self.viewModel.relationshipViewModel.isBlocking)),
+                .reportUser(.init(name: name)),
+                .shareUser(.init(name: name)),
+            ]
+
+            if let me = self.viewModel?.me, me.following.contains(user) {
+                let showReblogs = me.showingReblogsBy.contains(user)
+                let context = MastodonMenu.HideReblogsActionContext(showReblogs: showReblogs)
+                menuActions.insert(.hideReblogs(context), at: 1)
+            }
+
             let menu = MastodonMenu.setupMenu(
-                actions: [
-                    .muteUser(.init(name: name, isMuting: self.viewModel.relationshipViewModel.isMuting)),
-                    .blockUser(.init(name: name, isBlocking: self.viewModel.relationshipViewModel.isBlocking)),
-                    .reportUser(.init(name: name)),
-                    .shareUser(.init(name: name)),
-                ],
+                actions: menuActions,
                 delegate: self
             )
             return menu
@@ -397,7 +422,9 @@ extension ProfileViewController {
             }
         } receiveValue: { [weak self] menu in
             guard let self = self else { return }
-            self.moreMenuBarButtonItem.menu = menu
+            OperationQueue.main.addOperation {
+              self.moreMenuBarButtonItem.menu = menu
+            }
         }
         .store(in: &disposeBag)
     }
@@ -486,7 +513,7 @@ extension ProfileViewController {
         os_log(.info, log: .debug, "%{public}s[%{public}ld], %{public}s", ((#file as NSString).lastPathComponent), #line, #function)
         guard let setting = context.settingService.currentSetting.value else { return }
         let settingsViewModel = SettingsViewModel(context: context, authContext: viewModel.authContext, setting: setting)
-        coordinator.present(scene: .settings(viewModel: settingsViewModel), from: self, transition: .modal(animated: true, completion: nil))
+        _ = coordinator.present(scene: .settings(viewModel: settingsViewModel), from: self, transition: .modal(animated: true, completion: nil))
     }
 
     @objc private func shareBarButtonItemPressed(_ sender: UIBarButtonItem) {
@@ -526,20 +553,33 @@ extension ProfileViewController {
     @objc private func replyBarButtonItemPressed(_ sender: UIBarButtonItem) {
         os_log(.info, log: .debug, "%{public}s[%{public}ld], %{public}s", ((#file as NSString).lastPathComponent), #line, #function)
         guard let mastodonUser = viewModel.user else { return }
+        let mention = "@" + mastodonUser.acct
+        UITextChecker.learnWord(mention)
         let composeViewModel = ComposeViewModel(
             context: context,
             authContext: viewModel.authContext,
-            kind: .mention(user: mastodonUser.asRecrod)
+            destination: .topLevel,
+            initialContent: mention
         )
         _ = coordinator.present(scene: .compose(viewModel: composeViewModel), from: self, transition: .modal(animated: true, completion: nil))
     }
+    
+    @objc private func followedTagsItemPressed(_ sender: UIBarButtonItem) {
+        os_log(.info, log: .debug, "%{public}s[%{public}ld], %{public}s", ((#file as NSString).lastPathComponent), #line, #function)
+        
+        let followedTagsViewModel = FollowedTagsViewModel(context: context, authContext: viewModel.authContext)
+        _ = coordinator.present(scene: .followedTags(viewModel: followedTagsViewModel), from: self, transition: .show)
+    }
 
-    @objc private func refreshControlValueChanged(_ sender: UIRefreshControl) {
+    @objc private func refreshControlValueChanged(_ sender: RefreshControl) {
         os_log(.info, log: .debug, "%{public}s[%{public}ld], %{public}s", ((#file as NSString).lastPathComponent), #line, #function)
 
         if let userTimelineViewController = profilePagingViewController.currentViewController as? UserTimelineViewController {
             userTimelineViewController.viewModel.stateMachine.enter(UserTimelineViewModel.State.Reloading.self)
         }
+
+        // trigger authenticated user account update
+        viewModel.context.authenticationService.updateActiveUserAccountPublisher.send()
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             sender.endRefreshing()
@@ -740,7 +780,7 @@ extension ProfileViewController: ProfileHeaderViewControllerDelegate {
                             let alertController = UIAlertController(for: error, title: L10n.Common.Alerts.EditProfileFailure.title, preferredStyle: .alert)
                             let okAction = UIAlertAction(title: L10n.Common.Controls.Actions.ok, style: .default, handler: nil)
                             alertController.addAction(okAction)
-                            self.coordinator.present(
+                            _ = self.coordinator.present(
                                 scene: .alertController(alertController: alertController),
                                 from: nil,
                                 transition: .alertController(animated: true, completion: nil)
@@ -763,11 +803,11 @@ extension ProfileViewController: ProfileHeaderViewControllerDelegate {
                 break
             case .follow, .request, .pending, .following:
                 guard let user = viewModel.user else { return }
-                let reocrd = ManagedObjectRecord<MastodonUser>(objectID: user.objectID)
+                let record = ManagedObjectRecord<MastodonUser>(objectID: user.objectID)
                 Task {
                     try await DataSourceFacade.responseToUserFollowAction(
                         dependency: self,
-                        user: reocrd
+                        user: record
                     )
                 }
             case .muting:
@@ -816,10 +856,8 @@ extension ProfileViewController: ProfileHeaderViewControllerDelegate {
                 let cancelAction = UIAlertAction(title: L10n.Common.Controls.Actions.cancel, style: .cancel, handler: nil)
                 alertController.addAction(cancelAction)
                 present(alertController, animated: true, completion: nil)
-            case .blocked:
+            case .blocked, .showReblogs, .isMyself,.followingBy, .blockingBy, .suspended, .edit, .editing, .updating:
                 break
-            default:
-                assertionFailure()
             }
         }
         
@@ -872,7 +910,7 @@ extension ProfileViewController: MastodonMenuDelegate {
 // MARK: - ScrollViewContainer
 extension ProfileViewController: ScrollViewContainer {
     var scrollView: UIScrollView {
-        return tabBarPagerController.containerScrollView
+        return tabBarPagerController.relayScrollView
     }
 }
 
@@ -901,3 +939,13 @@ extension ProfileViewController: PagerTabStripNavigateable {
 
 }
 
+private extension ProfileViewController {
+    var currentInstance: Instance? {
+        guard let authenticationRecord = authContext.mastodonAuthenticationBox
+            .authenticationRecord
+            .object(in: context.managedObjectContext)
+        else { return nil }
+        
+        return authenticationRecord.instance
+    }
+}

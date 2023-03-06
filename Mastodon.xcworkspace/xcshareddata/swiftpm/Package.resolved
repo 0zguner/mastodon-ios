@@ -91,6 +91,15 @@
       }
     },
     {
+      "identity" : "nextlevelsessionexporter",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/NextLevel/NextLevelSessionExporter.git",
+      "state" : {
+        "revision" : "b6c0cce1aa37fe1547d694f958fac3c3524b74da",
+        "version" : "0.4.6"
+      }
+    },
+    {
       "identity" : "nuke",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/kean/Nuke.git",
@@ -187,15 +196,6 @@
       "state" : {
         "revision" : "f2616860a41f9d9932da412a8978fec79c06fe24",
         "version" : "0.1.4"
-      }
-    },
-    {
-      "identity" : "swiftyjson",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/SwiftyJSON/SwiftyJSON.git",
-      "state" : {
-        "revision" : "b3dcd7dbd0d488e1a7077cb33b00f2083e382f07",
-        "version" : "5.0.1"
       }
     },
     {

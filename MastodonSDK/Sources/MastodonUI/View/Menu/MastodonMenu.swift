@@ -40,16 +40,29 @@ public enum MastodonMenu {
 
 extension MastodonMenu {
     public enum Action {
+        case translateStatus(TranslateStatusActionContext)
         case muteUser(MuteUserActionContext)
         case blockUser(BlockUserActionContext)
         case reportUser(ReportUserActionContext)
         case shareUser(ShareUserActionContext)
         case bookmarkStatus(BookmarkStatusActionContext)
+        case hideReblogs(HideReblogsActionContext)
         case shareStatus
         case deleteStatus
         
         func build(delegate: MastodonMenuDelegate) -> BuiltAction {
             switch self {
+            case .hideReblogs(let context):
+                let title = context.showReblogs ? L10n.Common.Controls.Friendship.hideReblogs : L10n.Common.Controls.Friendship.showReblogs
+                let reblogAction = BuiltAction(
+                    title: title,
+                    image: UIImage(systemName: "arrow.2.squarepath")
+                ) { [weak delegate] in
+                    guard let delegate = delegate else { return }
+                    delegate.menuAction(self)
+                }
+
+                return reblogAction
             case .muteUser(let context):
                 let muteAction = BuiltAction(
                     title: context.isMuting ? L10n.Common.Controls.Friendship.unmuteUser(context.name) : L10n.Common.Controls.Friendship.muteUser(context.name),
@@ -114,6 +127,15 @@ extension MastodonMenu {
                     delegate.menuAction(self)
                 }
                 return deleteAction
+            case let .translateStatus(context):
+                let translateAction = BuiltAction(
+                    title: L10n.Common.Controls.Actions.TranslatePost.title(Locale.current.localizedString(forIdentifier: context.language) ?? L10n.Common.Controls.Actions.TranslatePost.unknownLanguage),
+                    image: UIImage(systemName: "character.book.closed")
+                ) { [weak delegate] in
+                    guard let delegate = delegate else { return }
+                    delegate.menuAction(self)
+                }
+                return translateAction
             }   // end switch
         }   // end func build
     }   // end enum Action
@@ -205,5 +227,20 @@ extension MastodonMenu {
             self.name = name
         }
     }
+
+    public struct HideReblogsActionContext {
+        public let showReblogs: Bool
+
+        public init(showReblogs: Bool) {
+            self.showReblogs = showReblogs
+        }
+    }
     
+    public struct TranslateStatusActionContext {
+        public let language: String
+        
+        public init(language: String) {
+            self.language = language
+        }
+    }
 }
